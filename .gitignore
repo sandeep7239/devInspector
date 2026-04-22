@@ -35,3 +35,6 @@ go.work.sum
 devinspector-app.pem
 devinspector
 devinspector.exe
+
+.vercel
+.env*.local
