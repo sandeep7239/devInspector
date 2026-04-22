@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 
+	"github.com/sandeep7239/devInspector/internal/remotepr"
 	"github.com/sandeep7239/devInspector/internal/rules"
 	"github.com/sandeep7239/devInspector/internal/scanner"
 	"github.com/sandeep7239/devInspector/internal/utils"
@@ -14,21 +15,32 @@ type scanRequest struct {
 	Path string `json:"path"`
 }
 
+type scanPRRequest struct {
+	Repo string `json:"repo"`
+	PR   int    `json:"pr"`
+}
+
+func Handler() http.Handler {
+	return newMux()
+}
+
 func Start(port string, logLevel string) error {
 	logger := utils.NewLogger(logLevel)
-	mux := http.NewServeMux()
+	addr := ":" + port
+	logger.Info("DevInspector UI and API listening on http://localhost%s", addr)
+	return http.ListenAndServe(addr, newMux())
+}
 
+func newMux() *http.ServeMux {
+	mux := http.NewServeMux()
 	mux.HandleFunc("/", dashboardHandler)
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "service": "DevInspector"})
 	})
 	mux.HandleFunc("/scan", scanHandler)
-
-	addr := ":" + port
-	logger.Info("DevInspector UI and API listening on http://localhost%s", addr)
-	return http.ListenAndServe(addr, mux)
+	mux.HandleFunc("/scan-pr", scanPRHandler)
+	return mux
 }
-
 func scanHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "POST required"})
@@ -57,6 +69,37 @@ func scanHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
+func scanPRHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "POST required"})
+		return
+	}
+
+	var req scanPRRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+		return
+	}
+	if req.Repo == "" || req.PR <= 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "repo and pr are required"})
+		return
+	}
+
+	checkout, err := remotepr.Fetch(req.Repo, req.PR)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	defer checkout.Cleanup()
+
+	cfg := utils.DefaultConfig()
+	result, err := scanner.New(rules.EnabledRules(cfg.DisabledRules), cfg.WorkerCount).Scan(checkout.Path)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
 func dashboardHandler(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
@@ -151,7 +194,7 @@ const dashboardHTML = `<!doctype html>
         <div>
           <div class="eyebrow">Production readiness scanner</div>
           <h1>Find risky DevOps code before it reaches production.</h1>
-          <p class="hero-copy">DevInspector checks repositories and pull-request branches for Dockerfile, environment, and dependency issues. Use it locally, from this dashboard, or inside GitHub Actions.</p>
+          <p class="hero-copy">DevInspector by Sandeep checks repositories and pull-request branches for Dockerfile, environment, and dependency issues. Use it locally, from this dashboard, or inside GitHub Actions.</p>
           <div class="hero-actions"><a class="button primary" href="#scan">Run a Scan</a><a class="button secondary" href="#pr">Validate a PR</a></div>
         </div>
         <div class="terminal">
@@ -176,7 +219,7 @@ Output:
           <form id="scan-form">
             <label for="path">Project path</label>
             <div class="input-row"><input id="path" name="path" value="." autocomplete="off"><button id="scan-button" type="submit">Run Scan</button></div>
-            <div class="hint">Use <code>.</code> for this repo, or paste another local repo path like <code>C:\Users\Sandeep\some-project</code>.</div>
+            <div class="hint">Local mode scans a folder on the machine where DevInspector is running. For hosted deployments, use the remote PR scanner below.</div>
           </form>
         </div>
         <aside class="summary" id="summary">
@@ -185,6 +228,15 @@ Output:
           <div class="metric"><span>Critical</span><strong>-</strong></div>
           <div class="metric"><span>Files scanned</span><strong>-</strong></div>
         </aside>
+      </section>
+
+      <section class="panel" id="remote-pr">
+        <h2 class="section-title">Remote GitHub PR Scanner</h2>
+        <form id="pr-form">
+          <label for="repo">GitHub repository</label>
+          <div class="input-row"><input id="repo" name="repo" placeholder="owner/repo or https://github.com/owner/repo" autocomplete="off"><input id="pr" name="pr" type="number" min="1" placeholder="PR number"><button id="pr-button" type="submit">Scan PR</button></div>
+          <div class="hint">Remote mode downloads a public GitHub PR archive, scans it in a temporary folder, and removes it after the report is generated.</div>
+        </form>
       </section>
 
       <section class="panel">
@@ -218,7 +270,9 @@ Output:
   </div>
   <script>
     const form = document.querySelector('#scan-form');
+    const prForm = document.querySelector('#pr-form');
     const button = document.querySelector('#scan-button');
+    const prButton = document.querySelector('#pr-button');
     const summary = document.querySelector('#summary');
     const issues = document.querySelector('#issues');
     const raw = document.querySelector('#raw');
@@ -247,6 +301,30 @@ Output:
       }
     });
 
+
+    prForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      prButton.disabled = true;
+      prButton.textContent = 'Scanning PR...';
+      issues.innerHTML = '<tr><td colspan="5">Fetching and scanning remote PR...</td></tr>';
+      try {
+        const response = await fetch('/scan-pr', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ repo: document.querySelector('#repo').value, pr: Number(document.querySelector('#pr').value) })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'PR scan failed');
+        render(data);
+      } catch (error) {
+        summary.innerHTML = metric('Score', '-') + metric('Total issues', '-') + metric('Critical', '-') + metric('Files scanned', '-');
+        issues.innerHTML = '<tr><td colspan="5">' + escapeHTML(error.message) + '</td></tr>';
+        raw.textContent = error.stack || error.message;
+      } finally {
+        prButton.disabled = false;
+        prButton.textContent = 'Scan PR';
+      }
+    });
     function render(data) {
       summary.innerHTML = metric('Score', data.overallScore + '/100') + metric('Total issues', data.totalIssues) + metric('Critical', data.criticalIssues) + metric('Files scanned', (data.results || []).length);
       const rows = [];

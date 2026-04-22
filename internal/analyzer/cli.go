@@ -4,10 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
-	"strings"
 
 	"github.com/fatih/color"
+	"github.com/sandeep7239/devInspector/internal/remotepr"
 	"github.com/sandeep7239/devInspector/internal/rules"
 	"github.com/sandeep7239/devInspector/internal/scanner"
 	"github.com/sandeep7239/devInspector/internal/server"
@@ -84,56 +83,14 @@ func scanPRCommand() *cobra.Command {
 }
 
 func runRemotePRScan(repo string, pr int, format string) error {
-	repoURL := normalizeRepoURL(repo)
-	tmpDir, err := os.MkdirTemp("", "devinspector-pr-*")
+	checkout, err := remotepr.Fetch(repo, pr)
 	if err != nil {
-		return fmt.Errorf("create temporary checkout: %w", err)
+		return err
 	}
-	defer os.RemoveAll(tmpDir)
+	defer checkout.Cleanup()
 
-	if err := runGit("clone", "--quiet", "--depth", "1", repoURL, tmpDir); err != nil {
-		return fmt.Errorf("clone repository: %w", err)
-	}
-
-	branch := fmt.Sprintf("devinspector-pr-%d", pr)
-	refspec := fmt.Sprintf("pull/%d/head:%s", pr, branch)
-	if err := runGitIn(tmpDir, "fetch", "--quiet", "origin", refspec); err != nil {
-		return fmt.Errorf("fetch pull request #%d: %w", pr, err)
-	}
-	if err := runGitIn(tmpDir, "checkout", "--quiet", branch); err != nil {
-		return fmt.Errorf("checkout pull request #%d: %w", pr, err)
-	}
-
-	fmt.Fprintf(os.Stderr, "Scanning PR #%d from %s\n", pr, repoURL)
-	return runScan(tmpDir, format)
-}
-
-func normalizeRepoURL(repo string) string {
-	repo = strings.TrimSpace(repo)
-	if strings.HasPrefix(repo, "http://") || strings.HasPrefix(repo, "https://") || strings.HasPrefix(repo, "git@") {
-		return repo
-	}
-	return "https://github.com/" + strings.TrimSuffix(repo, ".git") + ".git"
-}
-
-func runGit(args ...string) error {
-	return runGitIn("", args...)
-}
-
-func runGitIn(dir string, args ...string) error {
-	cmd := exec.Command("git", args...)
-	if dir != "" {
-		cmd.Dir = dir
-	}
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		message := strings.TrimSpace(string(out))
-		if message == "" {
-			message = err.Error()
-		}
-		return fmt.Errorf("git %s failed: %s", strings.Join(args, " "), message)
-	}
-	return nil
+	fmt.Fprintf(os.Stderr, "Scanning PR #%d from %s\n", pr, repo)
+	return runScan(checkout.Path, format)
 }
 
 func runScan(projectPath string, format string) error {

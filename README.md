@@ -2,7 +2,7 @@
 
 DevInspector is a production-readiness scanner for engineering projects. It checks Dockerfiles, environment files, and dependency manifests for risks that commonly block secure deployments: mutable image tags, leaked secrets, debug settings, and weak dependency pinning.
 
-The project includes a Go CLI, a built-in browser dashboard, a REST API, a pluggable rule engine, concurrent worker-pool scanning, Docker support, and GitHub Actions PR validation.
+The project includes a Go CLI, a built-in browser dashboard, a REST API, remote public GitHub PR scanning, a pluggable rule engine, concurrent worker-pool scanning, Docker support, and GitHub Actions PR validation.
 
 ## What It Checks
 
@@ -20,7 +20,7 @@ A repository or PR is considered risky when critical issues are found. In CI, `f
 
 - Cobra-based CLI with `scan`, `scan-pr`, `version`, `config`, and `serve` commands
 - Built-in browser dashboard at `http://localhost:8080`
-- REST API endpoint for scan automation
+- REST API endpoints for local scans and remote public GitHub PR scans
 - Pluggable rule interface for adding new checks
 - Concurrent file scanning with a worker pool
 - Table and JSON output modes
@@ -40,6 +40,41 @@ On Windows:
 go build -o devinspector.exe .\cmd\app
 ```
 
+
+## Deploy On Vercel
+
+Vercel can host the dashboard and remote public PR scanner. It cannot scan a visitor's private laptop path such as `C:\Users\...` because deployed code runs on Vercel's servers, not on the user's computer.
+
+This project includes:
+
+- `api/index.go` for the Vercel Go serverless function
+- `vercel.json` to route all web requests to that function
+- `/scan-pr` for public GitHub PR scanning from the hosted UI
+
+Deploy steps:
+
+```powershell
+npm install -g vercel
+cd C:\Users\Sandeep\devInspector
+vercel login
+vercel
+vercel --prod
+```
+
+Recommended Vercel project settings:
+
+- Framework preset: Other
+- Build command: leave empty
+- Output directory: leave empty
+- Install command: leave default
+
+After deployment, open the Vercel URL and use the Remote GitHub PR Scanner form with `owner/repo` and a PR number.
+
+Hosted limitations:
+
+- Public GitHub PR scanning works through GitHub archive download.
+- Local path scanning works only when the binary is running on the user's own machine.
+- Private repo scanning needs authentication support before it can work safely on a public deployment.
 ## Run The Dashboard
 
 ```powershell
@@ -87,7 +122,7 @@ curl -X POST http://localhost:8080/scan -H "Content-Type: application/json" -d "
 
 ## Validate A Remote GitHub PR
 
-Use `scan-pr` when the pull request exists on GitHub and you do not already have the branch locally. DevInspector creates a temporary checkout, fetches the PR branch, scans it, prints the result, and deletes the temporary folder.
+Use `scan-pr` when the pull request exists on GitHub and you do not already have the branch locally. DevInspector downloads the public GitHub PR archive, extracts it into a temporary folder, scans it, prints the result, and deletes the temporary folder.
 
 ```powershell
 .\devinspector.exe scan-pr --repo owner/repo --pr 12
