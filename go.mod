@@ -1,17 +1,14 @@
-module github.com/aryans1319/devdoctor
+module github.com/sandeep/devinspector
 
 go 1.23.4
 
 require (
 	github.com/fatih/color v1.18.0
-	github.com/golang-jwt/jwt/v5 v5.3.1
-	github.com/joho/godotenv v1.5.1
 	github.com/spf13/cobra v1.10.2
 	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
-	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect

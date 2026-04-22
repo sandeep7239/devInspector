@@ -1,0 +1,3 @@
+disabledRules: []
+workerCount: 5
+failOnCritical: true

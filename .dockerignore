@@ -1,0 +1,9 @@
+.git
+.github
+devinspector
+tmp
+dist
+build
+*.log
+.env
+.env.*
