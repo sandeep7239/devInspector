@@ -6,11 +6,11 @@ import (
 	"os"
 
 	"github.com/fatih/color"
-	"github.com/sandeep7239/devinspector/internal/rules"
-	"github.com/sandeep7239/devinspector/internal/scanner"
-	"github.com/sandeep7239/devinspector/internal/server"
-	"github.com/sandeep7239/devinspector/internal/utils"
-	"github.com/sandeep7239/devinspector/pkg/models"
+	"github.com/sandeep7239/devInspector/internal/rules"
+	"github.com/sandeep7239/devInspector/internal/scanner"
+	"github.com/sandeep7239/devInspector/internal/server"
+	"github.com/sandeep7239/devInspector/internal/utils"
+	"github.com/sandeep7239/devInspector/pkg/models"
 	"github.com/spf13/cobra"
 )
 

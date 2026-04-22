@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/sandeep/devinspector/internal/rules"
-	"github.com/sandeep/devinspector/internal/scanner"
-	"github.com/sandeep/devinspector/internal/utils"
-	"github.com/sandeep/devinspector/pkg/models"
+	"github.com/sandeep7239/devInspector/internal/rules"
+	"github.com/sandeep7239/devInspector/internal/scanner"
+	"github.com/sandeep7239/devInspector/internal/utils"
+	"github.com/sandeep7239/devInspector/pkg/models"
 )
 
 type scanRequest struct {

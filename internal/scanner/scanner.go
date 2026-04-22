@@ -7,8 +7,8 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/sandeep/devinspector/internal/rules"
-	"github.com/sandeep/devinspector/pkg/models"
+	"github.com/sandeep7239/devInspector/internal/rules"
+	"github.com/sandeep7239/devInspector/pkg/models"
 )
 
 type Scanner struct {

@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/sandeep/devinspector/pkg/models"
+	"github.com/sandeep7239/devInspector/pkg/models"
 )
 
 type DockerfileRule struct{}

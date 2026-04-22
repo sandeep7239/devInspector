@@ -4,7 +4,7 @@ import (
 	"errors"
 	"os"
 
-	"github.com/sandeep/devinspector/pkg/models"
+	"github.com/sandeep7239/devInspector/pkg/models"
 	"gopkg.in/yaml.v3"
 )
 

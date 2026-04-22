@@ -1,4 +1,4 @@
-module github.com/sandeep/devinspector
+module github.com/sandeep7239/devInspector
 
 go 1.23.4
 
