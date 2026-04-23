@@ -20,7 +20,7 @@ A repository or PR is considered risky when critical issues are found. In CI, `f
 
 - Cobra-based CLI with `scan`, `scan-pr`, `version`, `config`, and `serve` commands
 - Built-in browser dashboard at `http://localhost:8080`
-- REST API endpoints for local scans and remote public GitHub PR scans
+- REST API endpoints for local scans, public GitHub repository scans, and public GitHub PR scans
 - Pluggable rule interface for adding new checks
 - Concurrent file scanning with a worker pool
 - Table and JSON output modes
@@ -68,11 +68,11 @@ Recommended Vercel project settings:
 - Output directory: leave empty
 - Install command: leave default
 
-After deployment, open the Vercel URL and use the Remote GitHub PR Scanner form with `owner/repo` and a PR number.
+After deployment, open the Vercel URL. Use Remote Repository when no PR exists, or Remote Pull Request when you have a real PR number.
 
 Hosted limitations:
 
-- Public GitHub PR scanning works through GitHub archive download.
+- Public GitHub repository and PR scanning work through GitHub archive download.
 - Local path scanning works only when the binary is running on the user's own machine.
 - Private repo scanning needs authentication support before it can work safely on a public deployment.
 ## Run The Dashboard
@@ -96,7 +96,7 @@ Use `.` to scan the current repository, or paste another local repository path.
 .\devinspector.exe version
 .\devinspector.exe scan .
 .\devinspector.exe scan --format=json .
-.\devinspector.exe scan-pr --repo sandeep7239/devInspector --pr 1
+.\devinspector.exe scan-repo --repo sandeep7239/devInspector`r`n.\devinspector.exe scan-pr --repo sandeep7239/devInspector --pr 1
 .\devinspector.exe config
 ```
 
@@ -120,9 +120,18 @@ Run a scan:
 curl -X POST http://localhost:8080/scan -H "Content-Type: application/json" -d "{\"path\":\".\"}"
 ```
 
+## Validate A Remote GitHub Repository
+
+Use `scan-repo` when no pull request exists yet. DevInspector downloads the public repository default branch, scans it in a temporary folder, and deletes the folder after the report is generated.
+
+```powershell
+.\devinspector.exe scan-repo --repo owner/repo
+```
+
+You can also use the dashboard's Remote Repository form after deployment.
 ## Validate A Remote GitHub PR
 
-Use `scan-pr` when the pull request exists on GitHub and you do not already have the branch locally. DevInspector downloads the public GitHub PR archive, extracts it into a temporary folder, scans it, prints the result, and deletes the temporary folder.
+Use `scan-pr` only when the pull request exists on GitHub. If no PR exists, use `scan-repo`. DevInspector downloads the public GitHub PR archive, extracts it into a temporary folder, scans it, prints the result, and deletes the temporary folder.
 
 ```powershell
 .\devinspector.exe scan-pr --repo owner/repo --pr 12

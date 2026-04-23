@@ -9,13 +9,14 @@ import (
 	"github.com/sandeep7239/devInspector/internal/rules"
 	"github.com/sandeep7239/devInspector/internal/scanner"
 	"github.com/sandeep7239/devInspector/internal/utils"
+	"github.com/sandeep7239/devInspector/pkg/models"
 )
 
 type scanRequest struct {
 	Path string `json:"path"`
 }
 
-type scanPRRequest struct {
+type remoteRepoRequest struct {
 	Repo string `json:"repo"`
 	PR   int    `json:"pr"`
 }
@@ -38,9 +39,11 @@ func newMux() *http.ServeMux {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "service": "DevInspector"})
 	})
 	mux.HandleFunc("/scan", scanHandler)
+	mux.HandleFunc("/scan-repo", scanRepoHandler)
 	mux.HandleFunc("/scan-pr", scanPRHandler)
 	return mux
 }
+
 func scanHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "POST required"})
@@ -69,19 +72,50 @@ func scanHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
+func scanRepoHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "POST required"})
+		return
+	}
+
+	var req remoteRepoRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
+		return
+	}
+	if req.Repo == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "GitHub repository is required"})
+		return
+	}
+
+	checkout, err := remotepr.FetchRepository(req.Repo)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	defer checkout.Cleanup()
+
+	result, err := scanCheckout(checkout.Path)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 func scanPRHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "POST required"})
 		return
 	}
 
-	var req scanPRRequest
+	var req remoteRepoRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid JSON body"})
 		return
 	}
 	if req.Repo == "" || req.PR <= 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "repo and pr are required"})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "GitHub repository and PR number are required"})
 		return
 	}
 
@@ -92,14 +126,19 @@ func scanPRHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer checkout.Cleanup()
 
-	cfg := utils.DefaultConfig()
-	result, err := scanner.New(rules.EnabledRules(cfg.DisabledRules), cfg.WorkerCount).Scan(checkout.Path)
+	result, err := scanCheckout(checkout.Path)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
 }
+
+func scanCheckout(path string) (models.ScanResult, error) {
+	cfg := utils.DefaultConfig()
+	return scanner.New(rules.EnabledRules(cfg.DisabledRules), cfg.WorkerCount).Scan(path)
+}
+
 func dashboardHandler(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
@@ -124,103 +163,67 @@ const dashboardHTML = `<!doctype html>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>DevInspector</title>
   <style>
-    :root { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #152033; background: #f3f6fb; }
+    :root { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #102033; background: #eef3f8; }
     * { box-sizing: border-box; }
-    body { margin: 0; background: #f3f6fb; color: #152033; }
-    .shell { min-height: 100vh; }
-    .hero { background: linear-gradient(135deg, #0f172a 0%, #1d4ed8 58%, #0f766e 100%); color: white; padding: 28px min(5vw, 56px) 34px; }
-    .nav { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 36px; }
-    .brand { display: flex; align-items: center; gap: 10px; font-size: 22px; font-weight: 800; }
-    .brand-mark { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 8px; background: rgba(255,255,255,.15); border: 1px solid rgba(255,255,255,.28); }
-    .nav-links { display: flex; gap: 8px; flex-wrap: wrap; }
-    .nav-links a { color: #dbeafe; text-decoration: none; font-size: 14px; padding: 8px 10px; }
-    .hero-grid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(320px, .9fr); gap: 28px; align-items: stretch; }
-    .eyebrow { color: #bfdbfe; font-weight: 800; letter-spacing: 0; text-transform: uppercase; font-size: 13px; }
-    h1 { font-size: clamp(36px, 5vw, 64px); line-height: 1; margin: 12px 0 16px; letter-spacing: 0; }
-    .hero-copy { color: #e2e8f0; font-size: 17px; line-height: 1.6; max-width: 760px; }
-    .hero-actions { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 24px; }
-    .button, button { border: 0; border-radius: 7px; padding: 12px 16px; font-weight: 800; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; min-height: 44px; }
-    .primary { background: white; color: #1d4ed8; }
-    .secondary { background: rgba(255,255,255,.13); color: white; border: 1px solid rgba(255,255,255,.28); }
-    .terminal { background: #09111f; border: 1px solid rgba(255,255,255,.18); border-radius: 8px; padding: 16px; box-shadow: 0 24px 70px rgba(0,0,0,.28); min-height: 310px; }
-    .terminal-top { display: flex; gap: 6px; margin-bottom: 14px; }
-    .dot { width: 10px; height: 10px; border-radius: 50%; background: #ef4444; } .dot:nth-child(2){background:#f59e0b}.dot:nth-child(3){background:#22c55e}
-    .terminal pre { margin: 0; color: #cbd5e1; white-space: pre-wrap; line-height: 1.55; font-size: 14px; }
-    main { padding: 28px min(5vw, 56px) 48px; display: grid; gap: 20px; }
-    .section-title { margin: 0 0 12px; font-size: 24px; }
-    .grid { display: grid; gap: 16px; }
-    .cards { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
-    .panel, .card { background: white; border: 1px solid #d9e2ef; border-radius: 8px; box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06); }
-    .panel { padding: 18px; }
-    .card { padding: 16px; }
-    .card h3 { margin: 0 0 8px; font-size: 16px; }
-    .card p { margin: 0; color: #526175; line-height: 1.5; }
-    .scan-layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 16px; align-items: start; }
+    body { margin: 0; background: #eef3f8; color: #102033; }
+    .app { min-height: 100vh; }
+    .topbar { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 18px min(5vw, 56px); background: #0b1220; color: white; border-bottom: 1px solid #1e293b; }
+    .brand { display: flex; align-items: center; gap: 12px; font-size: 20px; font-weight: 800; }
+    .mark { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 8px; background: #22c55e; color: #052e16; font-weight: 900; }
+    .owner { color: #aab7c7; font-size: 14px; }
+    main { width: min(1180px, calc(100% - 32px)); margin: 22px auto 44px; display: grid; gap: 18px; }
+    .hero { display: grid; grid-template-columns: minmax(0, 1.1fr) 340px; gap: 18px; align-items: stretch; }
+    .panel, .card { background: #ffffff; border: 1px solid #d7e0ea; border-radius: 8px; box-shadow: 0 10px 26px rgba(15, 23, 42, 0.07); }
+    .panel { padding: 22px; }
+    h1, h2, h3, p { margin-top: 0; }
+    h1 { font-size: 38px; line-height: 1.08; letter-spacing: 0; margin-bottom: 12px; color: #0f172a; }
+    h2 { font-size: 22px; margin-bottom: 14px; color: #0f172a; }
+    h3 { font-size: 16px; margin-bottom: 8px; color: #0f172a; }
+    p, .muted { color: #526176; line-height: 1.58; }
+    .mode-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+    .card { padding: 18px; }
     form { display: grid; gap: 12px; }
-    label { font-weight: 800; }
-    .input-row { display: flex; gap: 10px; flex-wrap: wrap; }
-    input { min-width: min(560px, 100%); flex: 1; border: 1px solid #cbd5e1; border-radius: 7px; padding: 12px 13px; font-size: 15px; }
-    button { background: #2563eb; color: white; }
-    button:disabled { opacity: .65; cursor: wait; }
-    .hint { color: #64748b; font-size: 14px; }
+    label { font-weight: 800; color: #172033; }
+    .row { display: grid; grid-template-columns: minmax(0, 1fr) 160px auto; gap: 10px; }
+    .repo-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }
+    input { width: 100%; border: 1px solid #c9d5e2; border-radius: 7px; padding: 12px 13px; font-size: 15px; background: white; }
+    input:focus { outline: 3px solid #bfdbfe; border-color: #2563eb; }
+    button { border: 0; border-radius: 7px; padding: 12px 16px; min-height: 46px; background: #2563eb; color: white; font-weight: 800; cursor: pointer; white-space: nowrap; }
+    button.secondary { background: #0f766e; }
+    button:disabled { opacity: .68; cursor: wait; }
+    .hint { color: #66758a; font-size: 14px; margin: 0; }
     .summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-    .metric { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; }
-    .metric span { color: #64748b; font-size: 13px; font-weight: 700; }
-    .metric strong { display: block; font-size: 28px; margin-top: 4px; }
+    .metric { background: #f8fafc; border: 1px solid #dce5ef; border-radius: 8px; padding: 14px; }
+    .metric span { color: #66758a; font-size: 13px; font-weight: 800; }
+    .metric strong { display: block; font-size: 28px; margin-top: 4px; color: #0f172a; }
+    .toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .status { color: #526176; font-weight: 700; }
     table { width: 100%; border-collapse: collapse; font-size: 14px; }
-    th, td { text-align: left; border-bottom: 1px solid #e2e8f0; padding: 11px 10px; vertical-align: top; }
+    th, td { text-align: left; border-bottom: 1px solid #e2e8f0; padding: 12px 10px; vertical-align: top; }
     th { font-size: 12px; text-transform: uppercase; color: #475569; background: #f8fafc; }
-    .badge { display: inline-block; border-radius: 999px; padding: 3px 9px; font-size: 12px; font-weight: 800; background: #e2e8f0; color: #334155; }
+    .badge { display: inline-block; border-radius: 999px; padding: 3px 9px; font-size: 12px; font-weight: 900; background: #e2e8f0; color: #334155; }
     .CRITICAL, .ERROR { background: #fee2e2; color: #991b1b; }
     .WARNING { background: #fef3c7; color: #92400e; }
     .INFO { background: #dbeafe; color: #1e40af; }
     .OK { background: #dcfce7; color: #166534; }
+    .rules { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+    .json { white-space: pre-wrap; background: #0b1220; color: #dbeafe; border-radius: 8px; padding: 14px; max-height: 340px; overflow: auto; font-size: 13px; }
     code, pre { font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace; }
-    .json { white-space: pre-wrap; background: #111827; color: #d1d5db; border-radius: 8px; padding: 14px; overflow: auto; max-height: 360px; }
-    .workflow { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
-    .step { border-left: 4px solid #2563eb; padding: 12px 14px; background: #f8fafc; border-radius: 6px; }
-    .step strong { display: block; margin-bottom: 4px; }
-    @media (max-width: 860px) { .hero-grid, .scan-layout { grid-template-columns: 1fr; } .nav { align-items: flex-start; flex-direction: column; } }
+    @media (max-width: 900px) { .hero, .mode-grid, .rules, .row, .repo-row { grid-template-columns: 1fr; } .topbar { align-items: flex-start; flex-direction: column; } }
   </style>
 </head>
 <body>
-  <div class="shell">
-    <section class="hero">
-      <nav class="nav">
-        <div class="brand"><span class="brand-mark">DI</span> DevInspector</div>
-        <div class="nav-links"><a href="#scan">Scan</a><a href="#rules">Rules</a><a href="#pr">PR Checks</a><a href="/health">Health</a></div>
-      </nav>
-      <div class="hero-grid">
-        <div>
-          <div class="eyebrow">Production readiness scanner</div>
-          <h1>Find risky DevOps code before it reaches production.</h1>
-          <p class="hero-copy">DevInspector by Sandeep checks repositories and pull-request branches for Dockerfile, environment, and dependency issues. Use it locally, from this dashboard, or inside GitHub Actions.</p>
-          <div class="hero-actions"><a class="button primary" href="#scan">Run a Scan</a><a class="button secondary" href="#pr">Validate a PR</a></div>
-        </div>
-        <div class="terminal">
-          <div class="terminal-top"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>
-          <pre>devinspector scan --format=json .
-
-Rules loaded:
-  dockerfile-validation
-  env-security
-  dependency-version
-
-Output:
-  score, severity, file, line, suggestion</pre>
-        </div>
-      </div>
-    </section>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand"><span class="mark">DI</span><span>DevInspector</span></div>
+      <div class="owner">Production readiness checks by Sandeep</div>
+    </header>
 
     <main>
-      <section id="scan" class="scan-layout">
+      <section class="hero">
         <div class="panel">
-          <h2 class="section-title">Repository Scanner</h2>
-          <form id="scan-form">
-            <label for="path">Project path</label>
-            <div class="input-row"><input id="path" name="path" value="." autocomplete="off"><button id="scan-button" type="submit">Run Scan</button></div>
-            <div class="hint">Local mode scans a folder on the machine where DevInspector is running. For hosted deployments, use the remote PR scanner below.</div>
-          </form>
+          <h1>Scan repositories and pull requests before deployment.</h1>
+          <p>DevInspector checks Dockerfiles, environment files, and dependency manifests for risky DevOps patterns. Hosted scans work with public GitHub repositories and pull requests.</p>
         </div>
         <aside class="summary" id="summary">
           <div class="metric"><span>Score</span><strong>-</strong></div>
@@ -230,101 +233,105 @@ Output:
         </aside>
       </section>
 
-      <section class="panel" id="remote-pr">
-        <h2 class="section-title">Remote GitHub PR Scanner</h2>
-        <form id="pr-form">
-          <label for="repo">GitHub repository</label>
-          <div class="input-row"><input id="repo" name="repo" placeholder="owner/repo or https://github.com/owner/repo" autocomplete="off"><input id="pr" name="pr" type="number" min="1" placeholder="PR number"><button id="pr-button" type="submit">Scan PR</button></div>
-          <div class="hint">Remote mode downloads a public GitHub PR archive, scans it in a temporary folder, and removes it after the report is generated.</div>
+      <section class="mode-grid">
+        <div class="card">
+          <h2>Remote Repository</h2>
+          <form id="repo-form">
+            <label for="repo-only">GitHub repository</label>
+            <div class="repo-row"><input id="repo-only" placeholder="owner/repo or https://github.com/owner/repo"><button class="secondary" id="repo-button" type="submit">Scan Repo</button></div>
+            <p class="hint">Use this when the repository has no pull request yet.</p>
+          </form>
+        </div>
+
+        <div class="card">
+          <h2>Remote Pull Request</h2>
+          <form id="pr-form">
+            <label for="repo">GitHub repository and PR</label>
+            <div class="row"><input id="repo" placeholder="owner/repo"><input id="pr" type="number" min="1" placeholder="PR number"><button id="pr-button" type="submit">Scan PR</button></div>
+            <p class="hint">Use this only when a pull request exists on GitHub.</p>
+          </form>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Local Server Scan</h2>
+        <form id="scan-form">
+          <label for="path">Server path</label>
+          <div class="repo-row"><input id="path" value="."><button id="scan-button" type="submit">Scan Path</button></div>
+          <p class="hint">Available when DevInspector is running on your machine. A hosted Vercel app cannot read a visitor's laptop folders.</p>
         </form>
       </section>
 
       <section class="panel">
-        <h2 class="section-title">Findings</h2>
+        <div class="toolbar"><h2>Findings</h2><span class="status" id="status">Ready</span></div>
         <table>
           <thead><tr><th>Severity</th><th>Rule</th><th>Line</th><th>File</th><th>Message</th></tr></thead>
           <tbody id="issues"><tr><td colspan="5">Run a scan to see results.</td></tr></tbody>
         </table>
       </section>
 
-      <section id="rules" class="grid cards">
-        <div class="card"><h3>Dockerfile validation</h3><p>Flags latest tags, unpinned images, root containers, missing health checks, copied secrets, and missing .dockerignore files.</p></div>
-        <div class="card"><h3>.env security</h3><p>Detects secret-like values, production debug flags, tokens, passwords, and unsafe environment defaults.</p></div>
-        <div class="card"><h3>Dependency versions</h3><p>Checks Go, Node, and Python dependency manifests for floating or weak version declarations.</p></div>
-      </section>
-
-      <section id="pr" class="panel">
-        <h2 class="section-title">How PR validation works</h2>
-        <div class="workflow">
-          <div class="step"><strong>Manual PR check</strong>Checkout the PR branch locally, then scan that folder with DevInspector.</div>
-          <div class="step"><strong>Automatic PR check</strong>GitHub Actions builds DevInspector and runs it on every pull request.</div>
-          <div class="step"><strong>Quality decision</strong>The scanner scores supported files and fails CI when critical findings exist.</div>
-        </div>
+      <section class="rules">
+        <div class="card"><h3>Dockerfile</h3><p>Detects latest tags, root containers, broad copies, secrets, and missing health checks.</p></div>
+        <div class="card"><h3>Environment</h3><p>Detects secret-like values and unsafe production defaults in environment files.</p></div>
+        <div class="card"><h3>Dependencies</h3><p>Detects floating or weak versions in common dependency manifests.</p></div>
       </section>
 
       <section class="panel">
-        <h2 class="section-title">Raw JSON</h2>
+        <h2>Raw JSON</h2>
         <pre class="json" id="raw">JSON output will appear here.</pre>
       </section>
     </main>
   </div>
+
   <script>
-    const form = document.querySelector('#scan-form');
-    const prForm = document.querySelector('#pr-form');
-    const button = document.querySelector('#scan-button');
-    const prButton = document.querySelector('#pr-button');
     const summary = document.querySelector('#summary');
     const issues = document.querySelector('#issues');
     const raw = document.querySelector('#raw');
+    const statusText = document.querySelector('#status');
 
-    form.addEventListener('submit', async (event) => {
+    document.querySelector('#repo-form').addEventListener('submit', event => {
       event.preventDefault();
+      runRemote('/scan-repo', { repo: value('#repo-only') }, '#repo-button', 'Scanning repository...');
+    });
+
+    document.querySelector('#pr-form').addEventListener('submit', event => {
+      event.preventDefault();
+      runRemote('/scan-pr', { repo: value('#repo'), pr: Number(value('#pr')) }, '#pr-button', 'Scanning pull request...');
+    });
+
+    document.querySelector('#scan-form').addEventListener('submit', event => {
+      event.preventDefault();
+      runRemote('/scan', { path: value('#path') || '.' }, '#scan-button', 'Scanning server path...');
+    });
+
+    async function runRemote(endpoint, payload, buttonSelector, loadingText) {
+      const button = document.querySelector(buttonSelector);
       button.disabled = true;
+      const original = button.textContent;
       button.textContent = 'Scanning...';
-      issues.innerHTML = '<tr><td colspan="5">Scanning project...</td></tr>';
+      statusText.textContent = loadingText;
+      issues.innerHTML = '<tr><td colspan="5">' + escapeHTML(loadingText) + '</td></tr>';
       try {
-        const response = await fetch('/scan', {
+        const response = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ path: document.querySelector('#path').value || '.' })
+          body: JSON.stringify(payload)
         });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || 'Scan failed');
         render(data);
+        statusText.textContent = 'Scan completed';
       } catch (error) {
         summary.innerHTML = metric('Score', '-') + metric('Total issues', '-') + metric('Critical', '-') + metric('Files scanned', '-');
         issues.innerHTML = '<tr><td colspan="5">' + escapeHTML(error.message) + '</td></tr>';
         raw.textContent = error.stack || error.message;
+        statusText.textContent = 'Scan failed';
       } finally {
         button.disabled = false;
-        button.textContent = 'Run Scan';
+        button.textContent = original;
       }
-    });
+    }
 
-
-    prForm.addEventListener('submit', async (event) => {
-      event.preventDefault();
-      prButton.disabled = true;
-      prButton.textContent = 'Scanning PR...';
-      issues.innerHTML = '<tr><td colspan="5">Fetching and scanning remote PR...</td></tr>';
-      try {
-        const response = await fetch('/scan-pr', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ repo: document.querySelector('#repo').value, pr: Number(document.querySelector('#pr').value) })
-        });
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error || 'PR scan failed');
-        render(data);
-      } catch (error) {
-        summary.innerHTML = metric('Score', '-') + metric('Total issues', '-') + metric('Critical', '-') + metric('Files scanned', '-');
-        issues.innerHTML = '<tr><td colspan="5">' + escapeHTML(error.message) + '</td></tr>';
-        raw.textContent = error.stack || error.message;
-      } finally {
-        prButton.disabled = false;
-        prButton.textContent = 'Scan PR';
-      }
-    });
     function render(data) {
       summary.innerHTML = metric('Score', data.overallScore + '/100') + metric('Total issues', data.totalIssues) + metric('Critical', data.criticalIssues) + metric('Files scanned', (data.results || []).length);
       const rows = [];
@@ -337,13 +344,15 @@ Output:
           rows.push('<tr><td><span class="badge ' + issue.severity + '">' + issue.severity + '</span></td><td>' + escapeHTML(issue.rule) + '</td><td>' + (issue.line || '-') + '</td><td>' + escapeHTML(issue.file) + '</td><td>' + escapeHTML(issue.message) + (issue.suggestion ? '<br><strong>Suggestion:</strong> ' + escapeHTML(issue.suggestion) : '') + '</td></tr>');
         }
       }
-      issues.innerHTML = rows.length ? rows.join('') : '<tr><td colspan="5">No matching files found.</td></tr>';
+      issues.innerHTML = rows.length ? rows.join('') : '<tr><td colspan="5">No supported files were found in this repository.</td></tr>';
       raw.textContent = JSON.stringify(data, null, 2);
     }
 
     function metric(label, value) {
       return '<div class="metric"><span>' + escapeHTML(label) + '</span><strong>' + escapeHTML(value) + '</strong></div>';
     }
+
+    function value(selector) { return document.querySelector(selector).value.trim(); }
 
     function escapeHTML(value) {
       return String(value).replace(/[&<>'"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));

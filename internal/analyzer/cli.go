@@ -15,13 +15,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const Version = "1.1.0"
+const Version = "1.2.0"
 
 var (
 	outputFormat string
 	logLevel     string
 	port         string
-	prRepo       string
+	remoteRepo   string
 	prNumber     int
 )
 
@@ -33,7 +33,7 @@ func Execute() {
 	}
 
 	root.PersistentFlags().StringVar(&logLevel, "log-level", "WARN", "Log level: INFO, WARN, ERROR")
-	root.AddCommand(scanCommand(), scanPRCommand(), versionCommand(), configCommand(), serveCommand())
+	root.AddCommand(scanCommand(), scanRepoCommand(), scanPRCommand(), versionCommand(), configCommand(), serveCommand())
 
 	if err := root.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -61,25 +61,56 @@ func scanCommand() *cobra.Command {
 	return cmd
 }
 
-func scanPRCommand() *cobra.Command {
+func scanRepoCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "scan-pr --repo <github-repo-url-or-owner/name> --pr <number>",
-		Short: "Fetch and scan a remote GitHub pull request",
+		Use:   "scan-repo --repo <github-repo-url-or-owner/name>",
+		Short: "Fetch and scan a remote public GitHub repository",
 		Run: func(cmd *cobra.Command, args []string) {
-			if prRepo == "" || prNumber <= 0 {
-				fmt.Fprintln(os.Stderr, "scan-pr requires --repo and --pr")
+			if remoteRepo == "" {
+				fmt.Fprintln(os.Stderr, "scan-repo requires --repo")
 				os.Exit(1)
 			}
-			if err := runRemotePRScan(prRepo, prNumber, outputFormat); err != nil {
+			if err := runRemoteRepoScan(remoteRepo, outputFormat); err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				os.Exit(1)
 			}
 		},
 	}
-	cmd.Flags().StringVar(&prRepo, "repo", "", "GitHub repository URL or owner/name, for example https://github.com/org/repo or org/repo")
+	cmd.Flags().StringVar(&remoteRepo, "repo", "", "GitHub repository URL or owner/name, for example https://github.com/org/repo or org/repo")
+	cmd.Flags().StringVarP(&outputFormat, "format", "f", "table", "Output format: table or json")
+	return cmd
+}
+
+func scanPRCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "scan-pr --repo <github-repo-url-or-owner/name> --pr <number>",
+		Short: "Fetch and scan a remote public GitHub pull request",
+		Run: func(cmd *cobra.Command, args []string) {
+			if remoteRepo == "" || prNumber <= 0 {
+				fmt.Fprintln(os.Stderr, "scan-pr requires --repo and --pr")
+				os.Exit(1)
+			}
+			if err := runRemotePRScan(remoteRepo, prNumber, outputFormat); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+		},
+	}
+	cmd.Flags().StringVar(&remoteRepo, "repo", "", "GitHub repository URL or owner/name, for example https://github.com/org/repo or org/repo")
 	cmd.Flags().IntVar(&prNumber, "pr", 0, "Pull request number to scan")
 	cmd.Flags().StringVarP(&outputFormat, "format", "f", "table", "Output format: table or json")
 	return cmd
+}
+
+func runRemoteRepoScan(repo string, format string) error {
+	checkout, err := remotepr.FetchRepository(repo)
+	if err != nil {
+		return err
+	}
+	defer checkout.Cleanup()
+
+	fmt.Fprintf(os.Stderr, "Scanning repository %s\n", repo)
+	return runScan(checkout.Path, format)
 }
 
 func runRemotePRScan(repo string, pr int, format string) error {
@@ -155,7 +186,7 @@ func configCommand() *cobra.Command {
 func serveCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "serve",
-		Short: "Start the REST API wrapper",
+		Short: "Start the browser dashboard and REST API",
 		Run: func(cmd *cobra.Command, args []string) {
 			if err := server.Start(port, logLevel); err != nil {
 				fmt.Fprintln(os.Stderr, err)
@@ -185,7 +216,7 @@ func printTable(result models.ScanResult) {
 	fmt.Printf("Issues:  %d total, %d critical\n\n", result.TotalIssues, result.CriticalIssues)
 
 	if len(result.Results) == 0 {
-		ok.Println("No matching files found.")
+		ok.Println("No supported files found.")
 		return
 	}
 
