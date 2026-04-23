@@ -9,9 +9,9 @@ import (
 	"github.com/sandeep7239/devInspector/internal/remotepr"
 	"github.com/sandeep7239/devInspector/internal/rules"
 	"github.com/sandeep7239/devInspector/internal/scanner"
-	"github.com/sandeep7239/devInspector/internal/server"
 	"github.com/sandeep7239/devInspector/internal/utils"
 	"github.com/sandeep7239/devInspector/pkg/models"
+	"github.com/sandeep7239/devInspector/pkg/server"
 	"github.com/spf13/cobra"
 )
 
